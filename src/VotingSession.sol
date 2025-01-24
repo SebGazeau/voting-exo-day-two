@@ -17,7 +17,6 @@ contract VotingSession is IVotingSession, Ownable2Step {
     struct Session {
         vote vote;
         Proposal winningProposal;
-        address winningVoter;
     }
 
     uint16 private lotOfTen;
@@ -33,16 +32,16 @@ contract VotingSession is IVotingSession, Ownable2Step {
             Proposal[] memory proposals_,
             uint64 startDate_,
             uint64 endDate_,
+            uint64 numberOfRegistered_,
             WorkflowStatus workflowStatus_,
-            Proposal memory winningProposal_,
-            address winningVoter_
+            Proposal memory winningProposal_
         )
     {
         proposals_ = getProposalForOneSession(_index);
         (startDate_, endDate_) = getDatesForOneSession(_index);
         workflowStatus_ = getStatusForOneSession(_index);
+        numberOfRegistered_ = getNumberOfRegisteredForOneSession(_index);
         winningProposal_ = sessionList[_index].winningProposal;
-        winningVoter_ = sessionList[_index].winningVoter;
     }
 
     function getProposalForOneSession(uint8 _index) public view returns (Proposal[] memory proposals_) {
@@ -53,25 +52,66 @@ contract VotingSession is IVotingSession, Ownable2Step {
         return (sessionList[_index].vote.getStartDate(), sessionList[_index].vote.getEndDate());
     }
 
+    function getNumberOfRegisteredForOneSession(uint8 _index) public view returns (uint64 numberOfRegistered_) {
+        return sessionList[_index].vote.getNumberOfRegistered();
+    }
+
     function getStatusForOneSession(uint8 _index) public view returns (WorkflowStatus workflowStatus_) {
         return sessionList[_index].vote.workflowStatus;
     }
 
-    function setProposalForOneSession(uint8 _index, string memory _description) external {
+    function setProposalForOneSession(uint8 _index, string memory _description) external onlyOwner {
+        if (getStatusForOneSession(_index) != WorkflowStatus.ProposalsRegistrationStarted) {
+            revert Errors.InvalidWorkflowStatus(1);
+        }
+
         sessionList[_index].vote.setProposal(_description);
     }
 
-    function initNewVote(uint64 _startDate, uint64 _endDate) public {
+    function initNewVote(uint64 _startDate, uint64 _endDate) external onlyOwner {
         addSessions(_startDate, _endDate);
-        uint currentSize = getSessionSize();
-        Session storage session = sessionList[currentSize];
-        session.vote.setStartDate(_startDate);
-        session.vote.setEndDate(_endDate);
+    }
+
+    function changeStatusForOneSession(uint8 _index) external onlyOwner {
+        sessionList[_index].vote.changeStatus();
+
+        if (sessionList[_index].vote.workflowStatus == WorkflowStatus.VotesTallied) {
+            sessionList[_index].winningProposal = sessionList[_index].vote.proposals[0];
+        }
+    }
+
+    function excludeVoter(uint8 _index, address _voter) external onlyOwner {
+        if (getStatusForOneSession(_index) != WorkflowStatus.RegisteringVoters) revert Errors.InvalidWorkflowStatus(0);
+
+        sessionList[_index].vote.toggleVoterRegistration(_voter);
+    }
+
+    function toVote(uint8 _indexSession, uint8 _indexProposal) external {
+        if (getStatusForOneSession(_indexSession) != WorkflowStatus.VotingSessionStarted) {
+            revert Errors.InvalidWorkflowStatus(0);
+        }
+
+        sessionList[_indexSession].vote.toVote(_indexProposal, msg.sender);
+    }
+
+    function registerYourself(uint8 _index) external {
+        if (getStatusForOneSession(_index) != WorkflowStatus.RegisteringVoters) revert Errors.InvalidWorkflowStatus(0);
+
+        sessionList[_index].vote.setVoter(msg.sender);
+    }
+
+    function registerVoter(uint8 _index, address _voter) external onlyOwner {
+        if (getStatusForOneSession(_index) != WorkflowStatus.RegisteringVoters) revert Errors.InvalidWorkflowStatus(0);
+
+        sessionList[_index].vote.setVoter(_voter);
     }
 
     function getSessionSize() public view returns (uint length_) {
         for (uint i = 0; i < 10; i++) {
-            if (address(sessionList[i].winningVoter) != address(0)) {
+            if (
+                keccak256(abi.encodePacked(sessionList[i].winningProposal.description))
+                    != keccak256(abi.encodePacked(""))
+            ) {
                 length_++;
             }
         }
@@ -99,9 +139,9 @@ contract VotingSession is IVotingSession, Ownable2Step {
             sessionArchive[lotOfTen][i].vote.setAllProposals(session.vote.getAllProposals());
             sessionArchive[lotOfTen][i].vote.setStartDate(session.vote.getStartDate());
             sessionArchive[lotOfTen][i].vote.setEndDate(session.vote.getEndDate());
+            sessionArchive[lotOfTen][i].vote.setNumberOfRegistered(session.vote.getNumberOfRegistered());
             sessionArchive[lotOfTen][i].vote.setStatus(session.vote.getStatus());
             sessionArchive[lotOfTen][i].winningProposal = session.winningProposal;
-            sessionArchive[lotOfTen][i].winningVoter = session.winningVoter;
         }
     }
 
